@@ -1,0 +1,18 @@
+CREATE EXTERNAL TABLE IF NOT EXISTS `default`.`[rekognition_output_bucket_XXXXXX_table]`/* give your table a name and remove the brackets */
+(
+  `Sentiment` string,
+  `Confidence` double,
+  `Age` int,
+  `Gender` string,
+  `FaceOccluded` boolean
+)
+ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe'
+WITH SERDEPROPERTIES (
+  'ignore.malformed.json' = 'FALSE',
+  'dots.in.keys' = 'FALSE',
+  'case.insensitive' = 'TRUE',
+  'mapping' = 'TRUE'
+)
+STORED AS INPUTFORMAT 'org.apache.hadoop.mapred.TextInputFormat' OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+LOCATION 's3://rekognition-output-bucket-XXXXXX/' /* Enter the name of the S3 bucket that your Lambda function writes to */
+TBLPROPERTIES ('classification' = 'json')
