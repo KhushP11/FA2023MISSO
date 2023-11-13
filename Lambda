@@ -1,0 +1,86 @@
+'use strict';
+
+// This function needs necessary permissions on AWS Rekognition to make rekognition API calls and necessary permissions on 
+// S3 bucket to get and put objects
+const AWS = require('aws-sdk');
+
+// get reference to S3 client 
+var s3 = new AWS.S3();
+var rekognition = new AWS.Rekognition();
+
+exports.handler = async (event, context) => {
+    const CONFIDENCE_THRESHOLD = 70;
+
+    //parse the body and get the image
+    const bucket = event.Records[0].s3.bucket.name;
+    const key = event.Records[0].s3.object.key;
+
+    //decode key name to account for special characters
+    const decodedImage = decodeURIComponent(key.replace(/\+/g, ' '));
+
+    var params = {
+        Image: {
+            S3Object:
+            {
+                Bucket: bucket,
+                Name: decodedImage
+            }
+        },
+        Attributes: [
+            "EMOTIONS", "AGE_RANGE", "GENDER", "FACE_OCCLUDED"
+        ]
+    };
+
+    // Invoke detectFaces api of amazon rekognition
+    const data = await rekognition.detectFaces(params).promise();
+    const s3Bucket = process.env.OUTPUT_BUCKET;
+    var i = 0;  // iterator for pictures w/ mutliple faces
+    for (const face of data.FaceDetails) {
+        i++;
+        const objectName = decodedImage+'_sentiment' + i + '.json';
+        const emotiondata = face.Emotions;
+        // Use confident estimates only. Otherwise, set value to unknown
+        const genderdata = face.Gender.Confidence > CONFIDENCE_THRESHOLD ? face.Gender.Value : "unknown";
+        const agerange = face.AgeRange;
+        const averageage = (agerange.Low + agerange.High) / 2;
+        const face_occuluded = face.FaceOccluded.Value;
+        let newArray = emotiondata.filter(function (el) {
+            // 'unknown' sentiments are handled by the detectFaces API
+            return el.Confidence >= CONFIDENCE_THRESHOLD;
+        });
+        let objdata = {};
+        if (newArray.length > 0) {
+            objdata = {
+                "Sentiment": newArray[0].Type,
+                "Confidence": newArray[0].Confidence,
+                "Age": averageage,
+                "Gender": genderdata,
+                "FaceOccluded": face_occuluded
+            };
+        }
+        else {
+            objdata = {
+                "Sentiment": 'unknown',
+                "Age": averageage,
+                "Gender": genderdata,
+                "FaceOccluded": face_occuluded
+            };
+        }
+        try {
+            const params = {
+                Bucket: s3Bucket,
+                Key: objectName,
+                Body: JSON.stringify(objdata),
+                ContentType: "application/json"
+            };
+            // Put the sentimental analysis results in the S3 bucket 
+            const result = await s3.putObject(params).promise();
+            console.log("success");
+        } catch (error) {
+            console.log("error:" + error);
+            return 'error';
+        }
+    }
+
+    return 'success';
+};
